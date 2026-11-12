@@ -1,0 +1,40 @@
+rules_version = '2';
+service cloud.firestore {
+  match /databases/{database}/documents {
+
+    // ต้องเข้าสู่ระบบด้วยชื่อผู้ใช้และรหัสผ่าน (บัญชีที่ผู้ดูแลสร้างใน Firebase เท่านั้น)
+    function signedIn() {
+      return request.auth != null && request.auth.token.firebase.sign_in_provider == 'password';
+    }
+    // ผู้ดูแลระบบ: เพิ่มอีเมลในรายการนี้ และต้องตรงกับ FEMS_ADMINS ในไฟล์ firebase-config.js
+    function isAdmin() {
+      return signedIn() && request.auth.token.email in [
+        'safety@fire-extinguisher-check-bdfff.firebaseapp.com'
+      ];
+    }
+
+    // ทะเบียนถังและการตั้งค่า: ทุกบัญชีอ่านได้ เฉพาะผู้ดูแลแก้ไขได้
+    match /tanks/{id} { allow read: if signedIn(); allow write: if isAdmin(); }
+    match /cfg/{id}   { allow read: if signedIn(); allow write: if isAdmin(); }
+
+    // ผลตรวจ: ทุกบัญชีบันทึกผลและแก้ร่างได้ ผลที่ส่งแล้วแก้หรือลบได้เฉพาะผู้ดูแล
+    match /insp/{id} {
+      allow read, create: if signedIn();
+      allow update: if signedIn() && (resource.data.status == 'draft' || isAdmin());
+      allow delete: if isAdmin();
+    }
+
+    // ข้อบกพร่อง: ระบบสร้างให้ตอนส่งผล ติดตามแก้ไขได้เฉพาะผู้ดูแล
+    match /defects/{id} {
+      allow read, create: if signedIn();
+      allow update, delete: if isAdmin();
+    }
+
+    // รูปภาพ: เพิ่มได้ไม่เกินประมาณ 1 MB ต่อรูป ลบได้เฉพาะผู้ดูแล
+    match /blobs/{id} {
+      allow read: if signedIn();
+      allow create: if signedIn() && request.resource.data.d is string && request.resource.data.d.size() < 1000000;
+      allow delete: if isAdmin();
+    }
+  }
+}
